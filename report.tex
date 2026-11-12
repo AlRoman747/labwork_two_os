@@ -1,0 +1,454 @@
+\documentclass[11pt, a4paper]{article}
+
+% --- UNIVERSAL PREAMBLE BLOCK ---
+\usepackage[a4paper, top=2.5cm, bottom=2.5cm, left=2cm, right=2cm]{geometry}
+\usepackage{fontspec}
+
+\usepackage[russian, bidi=basic, provide=*]{babel}
+
+\babelprovide[import, onchar=ids fonts]{russian}
+\babelprovide[import, onchar=ids fonts]{english}
+
+% Set default/Latin font to Sans Serif in the main (rm) slot
+\babelfont{rm}{Noto Sans}
+% Assign a specific font for Russian text
+\babelfont[russian]{rm}{Noto Sans}
+
+% Add because main language is not English
+\usepackage{enumitem}
+\usepackage{booktabs}
+\setlist[itemize]{label=-}
+
+\usepackage{listings}
+\usepackage{xcolor}
+
+% Настройка внешнего вида листингов кода
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2,
+    language=C
+}
+\lstset{style=mystyle}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    
+    {\large \textbf{МОСКОВСКИЙ АВИАЦИОННЫЙ ИНСТИТУТ}} \\[0.5cm]
+    {\large \textbf{(НАЦИОНАЛЬНЫЙ ИССЛЕДОВАТЕЛЬСКИЙ УНИВЕРСИТЕТ)}} \\[2cm]
+    
+    {\Large \textbf{ОТЧЕТ}} \\
+    {\large по лабораторной работе № 2} \\
+    {\large по дисциплине «Операционные системы»} \\[1.5cm]
+    
+    {\Large \textbf{Тема: Управление процессами и межпроцессное взаимодействие (Pipes) в POSIX}} \\[3cm]
+    
+    \begin{flushright}
+        \textbf{Выполнил:} \\
+        студент группы М8О-203БВ-25 \\
+        Эль-Тахир Роман Райидович \\[1cm]
+        
+        \textbf{Проверил:} \\
+        преподаватель \\
+        Миронов Е.С.
+    \end{flushright}
+    
+    \vfill
+    {\large Москва -- \the\year}
+\end{titlepage}
+
+\newpage
+
+\section{Цель работы}
+Изучить механизмы создания процессов и межпроцессного взаимодействия в операционных системах Linux на примере неименованных каналов pipe, перенаправление стандартных потоков ввода-вывода,
+а также организацию кода с отделением работы с системными вызовами от общей логики программы.(\texttt{fork}, \texttt{exec}, \texttt{waitpid}) и организации межпроцессного взаимодействия с использованием неименованных каналов (\texttt{pipe}).
+
+\section{Постановка задачи}
+
+Необходимо разработать две \textbf{отдельные} программы: родительскую
+(\texttt{parent}) и дочернюю (\texttt{child}).
+
+\begin{itemize}[noitemsep]
+  \item Родительский процесс запрашивает у пользователя два имени файлов:
+        первая введённая строка~--- файл для \texttt{child1}, вторая~--- для \texttt{child2}.
+  \item Родитель создаёт два неименованных канала \texttt{pipe1} и \texttt{pipe2},
+        открывает выходные файлы и запускает два дочерних процесса.
+  \item Все последующие строки, введённые в консоль, распределяются по
+        каналам: \textbf{нечётные} строки (1-я, 3-я, \dots) отправляются в
+        \texttt{pipe1} (для \texttt{child1}), \textbf{чётные} (2-я, 4-я, \dots)~---
+        в \texttt{pipe2} (для \texttt{child2}).
+  \item Дочерние процессы читают строки из своего канала через \texttt{stdin},
+        \textbf{инвертируют} каждую строку и выводят в \texttt{stdout}, который
+        родитель перенаправил в соответствующий файл.
+  \item Программа должна работать в Linux (POSIX).
+\end{itemize}
+
+\textbf{Пример.} Ввод: \texttt{out1.txt}, \texttt{out2.txt}, \texttt{abc}, \texttt{def},
+\texttt{ghi}, \texttt{jkl}. Результат: в \texttt{out1.txt}~--- \texttt{cba}, \texttt{ihg};
+в \texttt{out2.txt}~--- \texttt{fed}, \texttt{lkj}.
+
+\section{Структура проекта и архитектура}
+
+Проект собирается системой CMake и состоит из следующих модулей:
+
+\begin{center}
+\begin{tabular}{@{}p{4.2cm}p{10cm}@{}}
+\toprule
+\textbf{Файл / папка} & \textbf{Назначение}\\
+\midrule
+\texttt{common/\allowbreak{}errors.c} & Вывод сообщений об ошибках (\texttt{errno}).\\
+\texttt{common/\allowbreak{}io\_\allowbreak{}utils.c} & Чтение строки произвольной длины (\texttt{read\_\allowbreak{}line}).\\
+\texttt{os/\allowbreak{}os.h} & Единый интерфейс работы с процессами, каналами и файлами.\\
+\texttt{os/\allowbreak{}os\_\allowbreak{}linux.c} & Реализация интерфейса для Linux (POSIX).\\
+\texttt{parent/\allowbreak{}main.c} & Родительская программа.\\
+\texttt{child/\allowbreak{}main.c} & Дочерняя программа (инверсия строк).\\
+\texttt{tests/\allowbreak{}run\_\allowbreak{}test.cmake} & Автоматический тест (\texttt{ctest}).\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Ключевая идея архитектуры~--- \textbf{слой абстракции}. Файл \texttt{os.h}
+объявляет набор функций (\texttt{os\_\allowbreak{}pipe\_\allowbreak{}create}, \texttt{os\_\allowbreak{}process\_\allowbreak{}start},
+\texttt{os\_\allowbreak{}write\_\allowbreak{}all}, \texttt{os\_\allowbreak{}close}, \texttt{os\_\allowbreak{}process\_\allowbreak{}wait}\dots) и
+типы данных. Логика родителя в \texttt{parent/\allowbreak{}main.c}
+не содержит прямых вызовов \texttt{fork} или \texttt{execl}: они скрыты
+внутри \texttt{os\_\allowbreak{}linux.c}. Типы вынесены в \texttt{os.h}:
+
+\begin{lstlisting}
+typedef int os_handle_t;             /* Linux: fd (int)   */
+#define OS_INVALID_HANDLE (-1)
+\end{lstlisting}
+
+\subsection{Схема взаимодействия процессов}
+
+\begin{verbatim}
+                    +--------------------------------+
+   клавиатура --->  |            parent              |
+   (stdin)          | строка 1,2: имена файлов       |
+                    | нечётные --> pipe1             |
+                    | чётные   --> pipe2             |
+                    +---------+----------+-----------+
+                              |          |
+                         pipe1|          |pipe2
+                              v          v
+                    +-----------+     +-----------+
+                    |  child1   |     |  child2   |
+                    | stdin=p1  |     | stdin=p2  |
+                    | stdout=f1 |     | stdout=f2 |
+                    +-----+-----+     +-----+-----+
+                          v                 v
+                      файл 1            файл 2
+                   (строки перевёрнуты)
+\end{verbatim}
+\section{Описание основных системных вызовов (Linux)}
+
+\subsection{Директива \texttt{\#define \_GNU\_SOURCE}}
+
+Макрос, который необходимо указать \textbf{до} всех \texttt{\#include}.
+Он включает в заголовочных файлах библиотеки glibc нестандартные
+расширения Linux. В нашем коде он нужен для функции \texttt{pipe2()}: без него её
+объявления в \texttt{<unistd.h>} не будет.
+
+\subsection{Тип \texttt{os\_handle\_t}}
+
+Собственный тип проекта. Это \texttt{int}~--- файловый дескриптор, то есть
+номер открытого файла, канала или сокета в таблице процесса. Отдельное имя
+типа делает интерфейс \texttt{os.h} понятным и позволяет при необходимости
+изменить представление дескриптора, не меняя код родителя.
+
+\subsection{Тип \texttt{ssize\_t}}
+
+Знаковый целочисленный тип для размеров. Отличается от \texttt{size\_\allowbreak{}t} наличием
+знака, что необходимо, так как функции \texttt{read}, \texttt{write},
+\texttt{readlink} возвращают число байт либо \texttt{-1} при ошибке.
+
+\subsection{Функция \texttt{pipe2}}
+
+\begin{lstlisting}
+int pipe2(int fds[2], int flags);
+\end{lstlisting}
+
+Создаёт неименованный канал~--- однонаправленный буфер в ядре. В \texttt{fds[0]}
+возвращается дескриптор для чтения, в \texttt{fds[1]}~--- для записи. Данные,
+записанные в \texttt{fds[1]}, можно прочитать из \texttt{fds[0]} в порядке FIFO.
+В отличие от обычной \texttt{pipe}, функция \texttt{pipe2} принимает флаги и
+позволяет атомарно установить \texttt{O\_\allowbreak{}CLOEXEC}. Это важно в многопоточных
+программах, где между \texttt{pipe} и \texttt{fcntl} мог бы произойти
+\texttt{fork}+\texttt{exec}.
+
+\subsection{Функция \texttt{open} и её флаги}
+
+\begin{lstlisting}
+int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+\end{lstlisting}
+
+Флаги объединяются побитовым ИЛИ:
+
+\begin{itemize}[noitemsep]
+  \item \texttt{O\_\allowbreak{}WRONLY}~--- открыть файл только на запись;
+  \item \texttt{O\_\allowbreak{}CREAT}~--- создать файл, если он не существует;
+  \item \texttt{O\_\allowbreak{}TRUNC}~--- если файл существует, обнулить его содержимое;
+  \item \texttt{O\_\allowbreak{}CLOEXEC}~--- закрыть дескриптор автоматически при вызове \texttt{exec}.
+\end{itemize}
+
+Число \texttt{0644} (восьмеричное)~--- права нового файла: владелец читает и
+пишет, остальные только читают.
+
+\subsection{Флаг \texttt{O\_CLOEXEC}}
+
+Флаг <<close on exec>>. Без него дочерняя программа после \texttt{exec}
+унаследовала бы \textit{все} открытые дескрипторы родителя, в том числе
+записывающие концы каналов. Тогда \texttt{child} никогда не получил бы
+конец файла (EOF) на \texttt{stdin}, потому что у него самого оставалась бы
+открытая копия записывающего конца, и программа зависла бы. Благодаря
+\texttt{O\_\allowbreak{}CLOEXEC} после \texttt{exec} остаются только дескрипторы 0, 1, 2,
+явно установленные через \texttt{dup2}.
+
+\subsection{Функция \texttt{fork}}
+
+Создаёт копию текущего процесса. В родителе возвращает идентификатор
+(pid) ребёнка, в ребёнке~--- \texttt{0}, при ошибке~--- \texttt{-1}.
+Это позволяет в одном коде развести поведение родителя и ребёнка:
+
+\begin{lstlisting}
+pid_t pid = fork();
+if (pid < 0)  { /* ошибка */ }
+if (pid == 0) { /* код ребёнка */ }
+proc->pid = pid; /* код родителя */
+\end{lstlisting}
+
+\subsection{Функция \texttt{dup2}}
+
+\begin{lstlisting}
+dup2(in,  STDIN_FILENO);   /* stdin  ребёнка = канал */
+dup2(out, STDOUT_FILENO);  /* stdout ребёнка = файл  */
+\end{lstlisting}
+
+\texttt{dup2(old, new)} делает дескриптор \texttt{new} копией \texttt{old},
+при необходимости предварительно закрывая \texttt{new}. Именно так выполняется
+\textbf{перенаправление ввода-вывода}: дочерняя программа не знает о каналах
+и файлах, она просто читает из дескриптора 0 и пишет в дескриптор 1.
+Важное свойство: копия, созданная \texttt{dup2}, \textbf{не} наследует
+\texttt{O\_\allowbreak{}CLOEXEC}, поэтому переживёт \texttt{exec}.
+
+\subsection{Функция \texttt{execl}}
+
+Заменяет образ текущего процесса новой программой. Если вызов удался,
+управление в старый код никогда не возвращается; возврат означает ошибку.
+После неудачного \texttt{execl} в ребёнке вызывается \texttt{\_\allowbreak{}exit(127)}
+(именно \texttt{\_\allowbreak{}exit}, а не \texttt{exit}, чтобы не сбрасывать копии
+буферов stdio, унаследованные от родителя).
+
+\subsection{Функция \texttt{readlink} и путь к \texttt{child}}
+
+Файл \texttt{/\allowbreak{}proc/\allowbreak{}self/\allowbreak{}exe}~--- символическая ссылка на исполняемый файл
+текущего процесса. Функция \texttt{readlink} читает её значение, то есть путь
+вида \texttt{/\allowbreak{}.../\allowbreak{}build/\allowbreak{}bin/\allowbreak{}parent}. Затем \texttt{strrchr(buf,'/\allowbreak{}')} находит
+последний слэш, после него подставляется имя \texttt{child}. Так
+\texttt{parent} находит \texttt{child} в своей папке независимо от
+текущей рабочей директории.
+
+\subsection{Функция \texttt{write} и цикл \texttt{os\_write\_all}}
+
+\texttt{write} может записать меньше байт, чем запрошено (например, при
+заполненном канале или прерывании сигналом). Поэтому запись выполняется в
+цикле до тех пор, пока не будут переданы все данные. Код ошибки
+\texttt{EINTR} (вызов прерван сигналом) не считается ошибкой~--- запись
+просто повторяется.
+
+\subsection{Функция \texttt{waitpid}}
+
+\begin{lstlisting}
+waitpid(proc->pid, &status, 0);
+\end{lstlisting}
+
+Блокирует родителя до завершения указанного дочернего процесса и
+записывает в \texttt{status} причину завершения. Помимо получения кода
+возврата, вызов \textbf{освобождает запись о процессе в ядре}; пока
+родитель не вызвал \texttt{waitpid}, завершившийся ребёнок остаётся
+<<зомби-процессом>>.
+
+\subsection{Макросы \texttt{WIFEXITED}, \texttt{WEXITSTATUS}, \texttt{WIFSIGNALED}, \texttt{WTERMSIG}}
+
+Значение \texttt{status} упаковано в битовое поле, поэтому расшифровывается
+макросами:
+
+\begin{center}
+\begin{tabular}{@{}p{4.3cm}p{10cm}@{}}
+\toprule
+\textbf{Макрос} & \textbf{Смысл}\\
+\midrule
+\texttt{WIFEXITED(s)} & Истина, если процесс завершился нормально (\texttt{return} из \texttt{main} или \texttt{exit}).\\
+\texttt{WEXITSTATUS(s)} & Код возврата (имеет смысл, только если \texttt{WIFEXITED} истинно).\\
+\texttt{WIFSIGNALED(s)} & Истина, если процесс был завершён сигналом (например, \texttt{SIGSEGV}, \texttt{SIGKILL}).\\
+\texttt{WTERMSIG(s)} & Номер сигнала, убившего процесс.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Сигнал \texttt{SIGPIPE}}
+
+Если записать в канал, у которого не осталось читателей, ядро посылает
+процессу \texttt{SIGPIPE}, что по умолчанию убивает программу. В родителе
+вызывается \texttt{signal(SIGPIPE, SIG\_\allowbreak{}IGN)}: тогда \texttt{write} просто
+вернёт ошибку \texttt{EPIPE}, которую можно обработать и корректно
+сообщить пользователю.
+
+\section{Платформонезависимые функции}
+
+\subsection{\texttt{read\_line}}
+
+Читает строку произвольной длины из \texttt{FILE*}. Буфер начинается с 128
+байт и удваивается через \texttt{realloc}, когда заканчивается место. Это
+исключает типичную ошибку фиксированного буфера (\texttt{char buf[256]}),
+из-за которой длинная строка обрезалась бы или портила память. Параметр
+\texttt{keep\_\allowbreak{}nl} определяет, сохранять ли \texttt{\textbackslash n}; символ
+\texttt{\textbackslash r} перед \texttt{\textbackslash n} (формат CRLF)
+отбрасывается. Ошибка передаётся через \texttt{*err}, а различие между
+<<конец ввода>> и <<ошибка>> делается проверкой \texttt{ferror}.
+
+\subsection{Инверсия строки в \texttt{child}}
+
+\begin{lstlisting}
+static void reverse(char *s, size_t len)
+{
+    size_t i, j;
+    char tmp;
+    if (len < 2) return;
+    for (i = 0, j = len - 1; i < j; i++, j--) {
+        tmp = s[i]; s[i] = s[j]; s[j] = tmp;
+    }
+}
+\end{lstlisting}
+
+Алгоритм «двух указателей»: один идёт с начала, другой с конца, символы
+меняются местами до встречи в середине. Проверка \texttt{len < 2} необходима,
+так как \texttt{len} имеет беззнаковый тип \texttt{size\_\allowbreak{}t}, и выражение
+\texttt{len - 1} для пустой строки дало бы огромное число. После каждой
+строки в \texttt{child} вызывается \texttt{fflush(stdout)}, чтобы данные
+попадали в файл сразу, а не копились в буфере.
+
+\subsection{Обработка ошибок}
+
+\texttt{err\_\allowbreak{}errno} печатает сообщение вида
+\texttt{<что делали>: <strerror(errno)>}. \texttt{err\_\allowbreak{}sys} в Linux
+вызывает \texttt{err\_\allowbreak{}errno}. Все функции слоя \texttt{os} возвращают
+\texttt{0} или \texttt{-1}, а сообщение об ошибке выводится на месте возникновения.
+
+\section{Алгоритм работы родительского процесса}
+
+\begin{enumerate}
+  \item Определить путь к \texttt{child} (\texttt{os\_\allowbreak{}sibling\_\allowbreak{}path}).
+  \item Прочитать два имени файлов.
+  \item Открыть файлы на запись и создать два канала.
+  \item Запустить \texttt{child1} (\texttt{stdin} = \texttt{pipe1}, \texttt{stdout} = файл~1).
+        Закрыть в родителе читающий конец канала и дескриптор файла~1.
+  \item Запустить \texttt{child2} аналогично, закрыть его читающий конец и файл~2.
+  \item В цикле читать строки из \texttt{stdin}: нечётные записывать в
+        \texttt{pipe1}, чётные в \texttt{pipe2}; при отсутствии завершающего
+        \texttt{\textbackslash n} добавлять его.
+  \item По концу ввода (Ctrl+D) закрыть
+        записывающие концы каналов~--- дети получат EOF.
+  \item Дождаться завершения обоих детей и проверить их коды возврата.
+\end{enumerate}
+
+Весь код очистки реализован через метку \texttt{cleanup} и \texttt{goto}:
+независимо от места возникновения ошибки выполняется один и тот же
+набор закрытий и ожиданий, что предотвращает утечки дескрипторов.
+Отдельные <<закрыть в родителе>> после запуска ребёнка нужны, чтобы
+в родителе не осталось лишних копий дескрипторов (иначе канал
+не получит EOF).
+
+
+\begin{itemize}
+  \item \textbf{Ошибка \texttt{CMakeCache.txt directory is different}.}
+        Папка \texttt{build} была создана CMake в другом окружении (другие
+        пути и генератор), а затем использовалась из WSL
+        (путь \texttt{/\allowbreak{}mnt/\allowbreak{}c/\allowbreak{}...}). Кэш конфигурации привязан к абсолютным
+        путям и генератору, поэтому после смены окружения папку
+        \texttt{build} нужно удалить и создать заново.
+  \item \textbf{Ошибка \texttt{CMAKE\_\allowbreak{}C\_\allowbreak{}COMPILER not set}.} В WSL не были
+        установлены компилятор и \texttt{make}. Решение:
+        \texttt{sudo apt install build-essential cmake}.
+\end{itemize}
+
+\section{Выводы}
+
+В ходе работы были изучены и применены на практике:
+
+\begin{enumerate}
+  \item \textbf{Модель процессов.} Освоена пара \texttt{fork}/\texttt{exec}
+        в Linux; понято, что создание процесса (\texttt{fork}) и запуск в нём
+        новой программы (\texttt{exec}) являются двумя отдельными шагами.
+  \item \textbf{Неименованные каналы.} Канал~--- односторонний буфер в
+        ядре. Однонаправленность и семантика EOF (конец данных наступает
+        только когда закрыты \textit{все} записывающие концы) определяют
+        правильное закрытие дескрипторов в родителе и ребёнке.
+  \item \textbf{Перенаправление потоков.} С помощью \texttt{dup2}
+        стандартные потоки ребёнка
+        подменяются каналом и файлом, поэтому \texttt{child} является обычной
+        консольной программой и не зависит от способа запуска.
+  \item \textbf{Наследование дескрипторов.} Утечка дескрипторов в
+        дочерний процесс~--- частая причина зависаний. Для её
+        предотвращения применяется флаг \texttt{O\_\allowbreak{}CLOEXEC}.
+  \item \textbf{Ожидание процессов.} Вызов \texttt{waitpid} необходим, чтобы получить результат
+        работы ребёнка и не оставлять зомби-процессов. Разбор статуса
+        через \texttt{WIFEXITED}/\texttt{WIFSIGNALED} позволяет отличить
+        нормальное завершение от аварийного.
+  \item \textbf{Надёжный ввод-вывод.} \texttt{write} может записать не
+        все данные, а системные вызовы могут быть прерваны сигналом
+        (\texttt{EINTR}), поэтому используется цикл записи и повтор вызова.
+        Чтение строк произвольной длины реализовано динамическим буфером.
+  \item \textbf{Модульность.} Разделение кода на общий слой, интерфейс
+        \texttt{os.h} и его реализацию \texttt{os\_\allowbreak{}linux.c} позволило отделить
+        логику родителя от системных вызовов и упростить чтение и отладку
+        программы.
+  \item \textbf{Инструменты.} Освоена система сборки CMake (статические
+        библиотеки, зависимости целей, \texttt{ctest}), а также
+        особенности запуска проекта в WSL и проблема кэша CMake при смене
+        среды сборки.
+\end{enumerate}
+
+Практически важный вывод: большинство ошибок при работе с процессами и
+каналами связано не с самими вызовами, а с \textbf{владением
+дескрипторами}~--- кто и когда закрывает какой конец канала. Именно
+аккуратное закрытие лишних копий обеспечивает корректное завершение
+программы.
+
+\medskip
+\noindent\textbf{Личные результаты.} В ходе выполнения лабораторной работы я
+научился создавать процессы с помощью системного вызова \texttt{fork} и
+запускать в них другие программы через \texttt{exec}. Я разобрался, как
+родительский процесс управляет дочерними: передаёт им данные через
+неименованные каналы (\texttt{pipe}), перенаправляет их ввод и вывод
+с помощью \texttt{dup2}, ожидает завершения через \texttt{waitpid} и по
+статусу определяет, завершился процесс нормально или был убит сигналом.
+Также я понял, как важно закрывать ненужные дескрипторы и как работают
+наследование дескрипторов, конец файла (EOF) в канале и сигналы
+(например, \texttt{SIGPIPE} и \texttt{SIGSEGV}). Кроме того, я
+научился находить и исправлять ошибки при работе с процессами, в том числе
+падение дочернего процесса из-за неподключённых заголовочных файлов.
+
+
+\end{document}
